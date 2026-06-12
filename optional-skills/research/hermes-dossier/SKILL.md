@@ -73,7 +73,22 @@ Fingerprint → Sequence-Liability Map → Wet-lab panel placeholder → Methods
 Integrity + RUO disclaimer) and a machine-readable JSON payload. See
 `references/DOSSIER_TEMPLATE.md` for the format.
 
-### 3 — Persist to Supabase (delivery layer)
+### 3 — Batch the whole catalogue ("data on stock")
+
+Characterise an entire antibody catalogue in one pass — this is the core
+data-asset engine. Input is a CSV (one antibody per row; columns
+`external_ref, name, vh, vl, hc, lc, provenance, storage_temp_c`).
+
+```bash
+python3 scripts/batch_dossier.py --catalogue catalogue.csv --out-dir dossiers/
+# add --push to also write every dossier to Supabase
+```
+
+Writes `<external_ref>.md` + `.json` per molecule plus a **portfolio index**
+(`index.csv` / `index.json`) ranked by developability risk — your sellable
+inventory map. Accepts `--catalogue -` to stream a CSV from stdin.
+
+### 4 — Persist to Supabase (delivery layer)
 
 Apply the schema once (`references/SCHEMA.sql`) via the Supabase MCP
 `apply_migration` tool, then push:
