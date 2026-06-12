@@ -38,6 +38,13 @@ create table if not exists dossiers (
 );
 create index if not exists idx_dossiers_molecule on dossiers (molecule_id);
 
+-- Lock down by default: RLS enabled with no policies. The service_role key
+-- (used by supabase_push.py) bypasses RLS, so server-side writes keep working;
+-- anon / authenticated get no access until Phase-2 tenant policies are added.
+alter table molecules enable row level security;
+alter table insilico_results enable row level security;
+alter table dossiers enable row level security;
+
 -- Phase 2 (NOT enabled in MVP):
 --   * characterization_results (wet-lab Jain panel: nanoDSF/DLS/SEC/AC-SINS/HIC/icIEF)
 --   * storage_conditions (full cold-chain history from ERP)
