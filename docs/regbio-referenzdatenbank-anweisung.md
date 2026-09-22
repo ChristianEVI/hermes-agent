@@ -65,16 +65,24 @@ Beide Spalten sind heute zu >90 % leer.
 - **SmPC (PDF)** — Fallback für Unit-Anzahl und Rekonstitutionsvolumen.
 - SPOR-Zugänge: **PMS-Token-Credential** (vorhanden, s. o.); **SMS Industry API** (Substanz-Stammdaten) nutzbar; **UPD** ist Tierarzneimittel → irrelevant; Historic Data Registration nicht nötig. Zugangsdaten nur als n8n-Credential, nie im Chat/Repo.
 
-### 3.2 Was PMS strukturiert liefert (Pilot-Befund)
-| Feld | Status |
-|---|---|
-| Produkt, Marke, Darreichungsform, Route | strukturiert |
-| EU-MA-Nummer **je Packung** | strukturiert (`RegulatedAuthorization`) |
-| MAH | strukturiert (`holder.display`) |
-| Stärke | strukturiert, **zwei Muster**: `presentationRatio` (Menge **und** Volumen je Behältnis, z. B. Mvasi 400 mg / 16 ml) oder `concentrationRatio` (nur mg/ml, Volumen fehlt) |
-| Unit-Anzahl je Packung | `packaging.containedItem` nur bei ~26 % der Produkte; sonst nur `description`-Freitext (`Packaging:… Package_size:… Content:…`) → Parser + SmPC-Fallback |
-| Biosimilar-Status | **nicht** in PMS (kein `legalBasis`) → EMA-Medicines-Liste |
-| Rekonstitutionsvolumen | nicht in PMS → SmPC |
+### 3.2 Was PMS strukturiert liefert (verifiziert 2026-09-22, Test-Flow `aD0u5lDXIrN2mDMs`)
+
+| Feld | Status | Quelle im FHIR-Bundle |
+|---|---|---|
+| Produkt, Marke, Darreichungsform | strukturiert | `MedicinalProductDefinition.name.part` (Codes 220000000002/4/5) |
+| EU-MA-Nummer **je Packung** | strukturiert | `RegulatedAuthorization.identifier` mit `subject = PackagedProductDefinition/{id}` |
+| Basis-MA-Nr. + Verfahrensnummer | strukturiert | `RegulatedAuthorization` mit `subject = MedicinalProductDefinition`, **nur `EU/1/…`** wählen (Orphan-Designationen `EU/3/…` hängen am selben Subject) |
+| MAH | strukturiert | `RegulatedAuthorization.holder.display` |
+| Menge je Unit | strukturiert | `Ingredient.substance.strength[].presentationRatio` (Achtung: `strength` liegt **unter `substance`**), Ingredient mit `for = ManufacturedItemDefinition` → z. B. 20 mg / 1 pre-filled syringe |
+| Volumen je Unit / Konzentration | strukturiert, produktweit | Ingredient mit `for = AdministrableProductDefinition` → 20 mg / 0,4 ml (`amount_and_volume`) oder 114,3 mg / 1 ml (`concentration_only`) |
+| Units je Packung | strukturiert (neuere Datensätze) | `PackagedProductDefinition.containedItemQuantity` (Wert + Unit-Typ-Code); sonst `description` („Package_size:1 …", „Pack size of 1 vial", „IN A VIAL" → 1) |
+| Packungsspezifisches Volumen | Freitext | `description` „Content:0.4 mL (50 mg/mL)" — **hat Vorrang** vor dem produktweiten Ratio (Amgevita: /001 = 0,4 ml, /010 = 0,2 ml bei gleichem Produkt) |
+| Pulver: rekonstituierte Konzentration | strukturiert | APD-Ratio (Adcetris 5 mg/ml) → Rekonstitutionsvolumen ableitbar = Menge / Konzentration (50 mg / 5 = 10 ml); gegen SmPC verifizieren |
+| Biosimilar-Status | **nicht** in PMS | EMA-Medicines-Liste (`canonical.product.is_biosimilar`) |
+
+Mehrere PMS-IDs je Produkt: `6000…` = EU-Ebene (Basis-Nr., Packungen, ggf. Orphan), `7000…` = nationale/sprachliche Varianten derselben MA-Nummer → **`6000…` bevorzugen**, Schlüssel = MA-Nummer der Packung.
+
+Coverage per Namenssuche im Pilot: 141/151 EU-Produkte (93 %). Fehlend u. a. Advate, Idelvion (Gerinnungsfaktoren), Naglazyme, Nexviadyme, Strensiq (Enzyme), Kineret, Blincyto, Gazyvaro, Vyvgart, Silapo → Import-Flow braucht **EU-MA-Nummer als Fallback-Schlüssel**.
 
 ### 3.3 Regeln Menge/Volumen
 - Lösungen: `Menge/Unit` und `Volumen/Unit` aus `presentationRatio`; bei
