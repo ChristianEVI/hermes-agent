@@ -82,14 +82,31 @@ Beide Spalten sind heute zu >90 % leer.
 
 Mehrere PMS-IDs je Produkt: `6000…` = EU-Ebene (Basis-Nr., Packungen, ggf. Orphan), `7000…` = nationale/sprachliche Varianten derselben MA-Nummer → **`6000…` bevorzugen**, Schlüssel = MA-Nummer der Packung.
 
-Coverage per Namenssuche im Pilot: 141/151 EU-Produkte (93 %). Fehlend u. a. Advate, Idelvion (Gerinnungsfaktoren), Naglazyme, Nexviadyme, Strensiq (Enzyme), Kineret, Blincyto, Gazyvaro, Vyvgart, Silapo → Import-Flow braucht **EU-MA-Nummer als Fallback-Schlüssel**.
+Einheiten-Codes in `presentationRatio` (SPOR-Liste 100000110633, verifiziert im Vollabzug):
+`100000110655` = mg · `100000110656` = µg · `100000110654` = g · `100000110671` = IU ·
+`100000110756` = **U** (Insulin-/Enzym-Einheiten, z. B. Dazparda 300 U/Pen, Cerezyme 400 U) ·
+`MA[U]`/`MA[IU]` = Millionen Einheiten (Filgrastim) · `100000110662` = ml · `100000110665`/`MABQ` = MBq
+(Radiopharmaka, werden nicht als Menge erfasst). Datenfehler kommen vor (Filgrastim HEXAL: „300 g" statt
+300 µg) → Plausibilitätsprüfung im Extraktor (§7b).
+
+Coverage per Namenssuche im Vollabzug: **alle** in-scope Humanarzneimittel mit Status AUTHORISED/OPINION
+werden gefunden. Dauer-Nichttreffer waren ausschließlich zurückgezogene/abgelehnte Anträge (jetzt per
+Status-Filter ausgeschlossen), Tierarzneimittel `EMEA/V/…` (PMS deckt nur Humanarzneimittel ab → aus der
+Kandidatenliste entfernt) und ganz neue Produkte mit Status OPINION, die in PMS noch nicht angelegt sind
+(z. B. Deqtynet). Ein Fallback über die EU-MA-Nummer ist daher nicht nötig; der definitive Join ist die
+**Verfahrensnummer** (§7a).
 
 ### 3.3 Regeln Menge/Volumen
-- Lösungen: `Menge/Unit` und `Volumen/Unit` aus `presentationRatio`; bei
-  `concentrationRatio` Volumen aus `description` oder SmPC ergänzen.
+- Lösungen: `Volumen/Unit` aus der Packungsbeschreibung (`Content: x ml`), sonst aus dem
+  APD-Verhältnis, sonst abgeleitet als Menge ÷ Konzentration (Konzentration aus Beschreibung,
+  APD oder Stärke-Text „100 units/ml"); `Menge/Unit` = Volumen × Konzentration, sonst
+  Fertigeinheiten-Verhältnis.
 - **Pulver/Lyophilisate:** erfasst wird die **Wirkstoffmenge je Unit**; das
-  **Rekonstitutionsvolumen** und das daraus resultierende **Endvolumen** kommen aus
-  dem SmPC → Gesamtvolumen = Units × Endvolumen.
+  **Rekonstitutionsvolumen** kommt aus dem **Lösungsmittel der Packung** (`solvent: 1 ml`),
+  sonst aus der Volumenangabe der Beschreibung, sonst = Menge ÷ rekonstituierte Konzentration;
+  in allen Fällen mit SmPC-Prüfvermerk (Endvolumen kann vom Lösungsmittelvolumen abweichen)
+  → Gesamtvolumen = Units × Rekonstitutionsvolumen.
+- Feste orale Formen (Tabletten/Kapseln, z. B. Rybelsus): kein Volumen, `total_volume_basis = not_applicable`.
 - Packung: `Gesamtmenge = Units × Menge/Unit`, `Gesamtvolumen = Units × Volumen/Unit`.
 - Konzentration ist abgeleitet (Anzeigefeld), kein Erfassungsfeld.
 
@@ -154,11 +171,13 @@ Aliquot-Vorschlagslogik (System schlägt vor, Mensch bestätigt):
 | `canonical.regulatory_molecule.scope_status / scope_class` | ✅ befüllt | 353 in_scope · 11 review · 1.367 out_of_scope |
 | `canonical.classify_molecule_scope()` | ✅ | setzt `molecule.core_scope_status` (193 in_scope, 2 review, 19 out) — manuelle Werte bleiben |
 | `canonical.stem_class_to_detail()` | ✅ | mappt Stamm-Klasse auf den CHECK-Katalog von `molecule_class_detail` |
-| `canonical.v_pms_import_candidates` + RPC `public.pms_import_candidates` | ✅ | **561 Kandidaten** (EU, Scope, nicht withdrawn, keine ATMP; 162 Biosimilars, 10 review = Antisense) |
+| `canonical.v_pms_import_candidates` + RPC `public.pms_import_candidates` | ✅ | **435 Kandidaten** (EU-Humanarzneimittel `EMEA/H/…`, Status AUTHORISED / OPINION / OPINION_UNDER_RE-EXAMINATION, Scope in_scope + review, nicht withdrawn, keine ATMP). Die RPC schließt je Lauf bereits importierte Präsentationen, bereits gestagete Bundles und die Skip-Tabelle aus → selbst-fortsetzende Batches |
+| `canonical.pms_import_skip` | ✅ angelegt | Dauer-Nichttreffer je `reg_product_id` mit Grund; wird von der Kandidaten-RPC ausgeschlossen |
+| `canonical.normalize_procedure_number(text)` | ✅ | `EMEA/H/C/006152/0000` → `EMEA/H/C/006152` (Trim, Großschreibung, Variations-Suffix) — Join-Schlüssel des Upserts |
 | `canonical.presentation_equivalence` (RLS an) | ✅ angelegt | EU↔US-Match-Status (§5) |
 | `canonical.presentation` +18 Spalten | ✅ | `units_per_pack`, `amount_per_unit_*`, `reconstituted_volume_per_unit_ml`, `pms_*`, `field_sources`, `needs_review`, `manual_locked`, 6 Aliquot-Spalten |
 | `canonical.propose_aliquots()` / `_fallback()` | ✅ | Regel n ≤ 50, sonst ≤ 100; 20–400 µl |
-| `public.canonical_upsert_pms_extract(run_id, payload)` | ✅ angelegt, Batch-Test ausstehend | Upsert Produkt/Präsentation/Market-Code, respektiert `manual_locked` |
+| `public.canonical_upsert_pms_extract(run_id, payload)` | ✅ im Vollabzug genutzt | Upsert Produkt/Präsentation/Market-Code; Produkt-Match über `normalize_procedure_number(ema_nr) = normalize_procedure_number(procedure_number)`; Market-Code wird per (presentation_id, market, code_type) aktualisiert, sonst angelegt; respektiert `manual_locked` |
 
 Offen (bewusst nicht angefasst): RLS auf `canonical.presentation_package`.
 
@@ -167,21 +186,26 @@ Offen (bewusst nicht angefasst): RLS auf `canonical.presentation_package`.
 | Flow | ID | Zweck |
 |---|---|---|
 | TEST — EMA PMS Public API Strukturtest | `aD0u5lDXIrN2mDMs` | verifizierte Extraktion (4 Produkte) + Suchschlüssel-Test |
-| **EMA PMS → canonical Import** | `IHDoKwgYA2PpDhoj` | Kandidaten (RPC) → Namenssuche → 6000…-Filter → `$everything` → Extraktion → `pms_stage` → Upsert; Batch über `Parameter`-Node (limit/offset) |
+| **EMA PMS → canonical Import** | `IHDoKwgYA2PpDhoj` | Kandidaten (RPC) → `Suchname` (Klammerzusätze entfernen) → Namenssuche → 6000…-Filter → `$everything` → `Extract Referenzfelder` → `pms_stage` → Dedupe → Upsert → `Summary`. Selbst-fortsetzend in 100er-Batches: Flow so oft starten, bis `Summary.candidates == 0`. `RUN_SUFFIX` im `Parameter`-Node (z. B. `-v2`) erzeugt einen neuen `run_id` und zieht alle Kandidaten neu ab |
 
-Credentials (einmalig in der UI anhängen): „EMA PMS Public API (OAuth2)" an `PMS Suche Name` + `PMS $everything`; „Supabase account FDA EMA" an `Kandidaten`, `Stage RPC`, `Upsert canonical`.
+Credentials (einmalig in der UI anhängen): „EMA PMS Public API (OAuth2)" an `PMS Suche Name` + `PMS $everything`; „Supabase account FDA EMA" an `Kandidaten`, `Stage RPC`, `Upsert canonical`. Die Zuordnung überlebt Updates über die MCP-Schnittstelle, solange die Node-Namen unverändert bleiben.
 
-Suchschlüssel-Befund: Namenssuche findet alle 10 zuvor fehlenden Produkte (Contains-Suche, bis 44 Treffer); `RegulatedAuthorization?identifier=` ist in der Public API **nicht exponiert** (404). Definitiver Join = Verfahrensnummer `EMEA/H/C/…` (`regulatory_product.ema_nr` ↔ `RegulatedAuthorization.case.identifier`).
+`Summary` je Batch: `candidates`, `search_no_hit` (Namen ohne PMS-Treffer → ggf. in `canonical.pms_import_skip` eintragen), `procedure_mismatch_products`, `fetch_errors`, `needs_review` (max. 50), `payload_stats`, `upsert_result`.
+
+Suchschlüssel-Befund: Namenssuche findet alle 10 zuvor fehlenden Produkte (Contains-Suche, bis 44 Treffer); `RegulatedAuthorization?identifier=` ist in der Public API **nicht exponiert** (404). Definitiver Join = Verfahrensnummer `EMEA/H/C/…` (`regulatory_product.ema_nr` ↔ `RegulatedAuthorization.case.identifier`), **normalisiert**: PMS liefert teils `EMEA/H/C/006152/0000` (Izamby) und pro Produkt mehrere `RegulatedAuthorization`-Datensätze, von denen nur einer den `case` trägt (Dazparda, Korjuny) → der Extraktor nimmt die erste vorhandene `case.identifier` aller Produkt-Autorisierungen und entfernt das Suffix.
 
 ## 7b. Extraktions- und Import-Regeln (verifiziert an 10 Produkten / 170 Packungen, 2026-09-22)
 
 | Regel | Umsetzung |
 |---|---|
-| **Primäreinheit je Produkt** | `IU`, wenn irgendein PMS-Verhältnis IU liefert (Epoetine, Insuline, Faktoren); sonst Masse, `mg`/`mcg`/`g` auf **mg** normalisiert. Einheiten werden nie gemischt; Zweiteinheiten landen in `secondary_strengths`. |
-| **Menge je Unit** | Summe der Fertigeinheiten-Verhältnisse (`Ingredient for ManufacturedItemDefinition`) in der Primäreinheit — Insulin-Mischungen (Actraphane 30: 210 IU + 90 IU = 300 IU/Pen) werden summiert; verschiedene Substanz-Codes → `needs_review` „Kombination". |
-| **Volumen je Unit** | Packungsbeschreibung (`Content: x mL`, `… OF 0.3 ML`, `CONTAINING 3 ML`, `3 mL per Pen`, `N x V ml`) hat Vorrang vor dem produktweiten APD-Verhältnis. |
-| **Units je Packung** | `containedItemQuantity`, sonst Beschreibung (`Package_size:N`, `Pack size of N`, Zahlwörter „FIVE PRE-FILLED SYRINGE(S)", `IN A VIAL` → 1). |
-| **Pulver** | Menge je Vial + rekonstituierte Konzentration (APD) → Rekonstitutionsvolumen = Menge / Konzentration; `total_volume_basis = reconstituted_derived`, SmPC-Prüfvermerk. |
+| **Einheiten-Familie je Produkt** | **Einheiten** (`IU`, `U`, `MU`, `MIU`), wenn irgendein PMS-Verhältnis Einheiten liefert (Epoetine, Insuline, Faktoren, Enzyme); sonst **Masse**, `mg`/`mcg`/`g` auf **mg** normalisiert (Aranesp 20 µg → 0,02 mg). Das Einheiten-Label folgt der Fertigeinheit (`U` bei Insulinen/Enzymen, `IU` bei Epoetinen/Faktoren, `MU` bei Filgrastim). Familien werden nie gemischt: mg-Angaben zu Insulinen („3,5 mg/ml") werden ignoriert, Zweiteinheiten landen in `secondary_strengths`; gemischte Labels (U/IU) → `needs_review`. |
+| **Menge je Unit** | Rangfolge: Packungstext (`powder: 25 mg`, `containing 400 mg`) → Volumen × Konzentration → Fertigeinheit → APD. Fertigeinheiten (`Ingredient for ManufacturedItemDefinition`) werden je Packung über `containedItem` zugeordnet: verschiedene Substanz-Codes werden summiert (Kombination → `needs_review`), gleiche Werte gelten als Duplikat, verschiedene Werte desselben Wirkstoffs (Awiqli 700/1050/2100 U = Pen-Größen, Rebif Initiationspackung) gelten als Größenvarianten und werden nur über Volumen × Konzentration aufgelöst, sonst `needs_review`. Insulin-Mischungen (Actraphane 30: 3 ml × 100 IU/ml = 300 IU/Pen) laufen über den Stärke-Text. |
+| **Konzentration** | Packungstext in Klammern (`(3.5 mg/ml)`, `(10000 IU/ml)`, `(24 million IU/ml)`, `(40 µg/ml)`) → APD-Verhältnis → Stärke-Text des Produktnamens (`100 UNITS/ML`); nur in der Primärfamilie. |
+| **Volumen je Unit** | Packungsbeschreibung (`Content: x mL`, `… OF 0.3 ML`, `CONTAINING 3 ML`, `3 mL per Pen`, `N x V ml`) hat Vorrang vor dem produktweiten APD-Verhältnis; fehlt beides, wird Menge ÷ Konzentration abgeleitet (`fill_derived`, Prüfvermerk; Dazparda 300 U ÷ 100 U/ml = 3 ml). |
+| **Units je Packung** | `containedItemQuantity` (Wert > 0), sonst Beschreibung (`Package_size:N`, `Pack size of N`, Zahlwörter „FIVE PRE-FILLED SYRINGE(S)", `IN A VIAL` → 1). Initiationspackungen mit gemischten Stärken bleiben `needs_review`. |
+| **Pulver** | Menge je Vial + Rekonstitutionsvolumen: Lösungsmittel der Packung (`solvent: 1 ml` → `reconstituted_solvent`) → Volumenangabe im Text (`reconstituted_text`) → APD-Verhältnis (`reconstituted_apd`) → Menge ÷ Konzentration (`reconstituted_derived`); immer mit SmPC-Prüfvermerk, aber ohne `needs_review`, wenn Units und Menge bekannt sind. |
+| **Feste orale Formen** | Tabletten/Kapseln: kein Volumen, `total_volume_basis = not_applicable`, kein Prüfvermerk. |
+| **Plausibilität** | Masse > 5 g je Einheit → `needs_review` „PMS-Einheit prüfen" (Filgrastim HEXAL: PMS liefert „300 g"). Unbekannte Einheiten-Codes (MBq, `0`) → keine Menge, `needs_review`. |
 | **Dedupe** | Mehrere PMS-Datensätze (`6000…`, Sprach-/Länder-Varianten) je MA-Nummer → der vollständigste (Score aus Units, Menge, Volumen, Struktur) gewinnt. Im Test: 264 Duplikate → 170 eindeutige Packungen. |
 | **Join** | Nur Bundles, deren Verfahrensnummer (`EMEA/H/C/…`) zum Kandidaten passt, werden geschrieben. |
 | **Schutz kuratierter Daten** | 775 vorbestehende EU-Präsentationen sind `manual_locked`: bestehende Werte bleiben, NULL-Felder werden aufgefüllt. Sperre per SQL aufhebbar. |
