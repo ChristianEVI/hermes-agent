@@ -173,11 +173,26 @@ Credentials (einmalig in der UI anhängen): „EMA PMS Public API (OAuth2)" an `
 
 Suchschlüssel-Befund: Namenssuche findet alle 10 zuvor fehlenden Produkte (Contains-Suche, bis 44 Treffer); `RegulatedAuthorization?identifier=` ist in der Public API **nicht exponiert** (404). Definitiver Join = Verfahrensnummer `EMEA/H/C/…` (`regulatory_product.ema_nr` ↔ `RegulatedAuthorization.case.identifier`).
 
+## 7b. Extraktions- und Import-Regeln (verifiziert an 10 Produkten / 170 Packungen, 2026-09-22)
+
+| Regel | Umsetzung |
+|---|---|
+| **Primäreinheit je Produkt** | `IU`, wenn irgendein PMS-Verhältnis IU liefert (Epoetine, Insuline, Faktoren); sonst Masse, `mg`/`mcg`/`g` auf **mg** normalisiert. Einheiten werden nie gemischt; Zweiteinheiten landen in `secondary_strengths`. |
+| **Menge je Unit** | Summe der Fertigeinheiten-Verhältnisse (`Ingredient for ManufacturedItemDefinition`) in der Primäreinheit — Insulin-Mischungen (Actraphane 30: 210 IU + 90 IU = 300 IU/Pen) werden summiert; verschiedene Substanz-Codes → `needs_review` „Kombination". |
+| **Volumen je Unit** | Packungsbeschreibung (`Content: x mL`, `… OF 0.3 ML`, `CONTAINING 3 ML`, `3 mL per Pen`, `N x V ml`) hat Vorrang vor dem produktweiten APD-Verhältnis. |
+| **Units je Packung** | `containedItemQuantity`, sonst Beschreibung (`Package_size:N`, `Pack size of N`, Zahlwörter „FIVE PRE-FILLED SYRINGE(S)", `IN A VIAL` → 1). |
+| **Pulver** | Menge je Vial + rekonstituierte Konzentration (APD) → Rekonstitutionsvolumen = Menge / Konzentration; `total_volume_basis = reconstituted_derived`, SmPC-Prüfvermerk. |
+| **Dedupe** | Mehrere PMS-Datensätze (`6000…`, Sprach-/Länder-Varianten) je MA-Nummer → der vollständigste (Score aus Units, Menge, Volumen, Struktur) gewinnt. Im Test: 264 Duplikate → 170 eindeutige Packungen. |
+| **Join** | Nur Bundles, deren Verfahrensnummer (`EMEA/H/C/…`) zum Kandidaten passt, werden geschrieben. |
+| **Schutz kuratierter Daten** | 775 vorbestehende EU-Präsentationen sind `manual_locked`: bestehende Werte bleiben, NULL-Felder werden aufgefüllt. Sperre per SQL aufhebbar. |
+| **Aliquot-Vorschlag** | kleinstes Volumen aus {20…400 µl} mit n ≤ 50, sonst ≤ 100; wenn selbst 400 µl > 100 ergibt → 100 × 400 µl (`capped_100`). Bestätigte Werte werden nie überschrieben. |
+| **Batching** | Import läuft selbst-fortsetzend in 100er-Batches (`pms_import_candidates(p_exclude_run_id)`), um n8n-Speicher zu schonen (~10 `$everything`-Bundles je Kandidat). |
+
 ## 8. Umsetzungsreihenfolge
 
 1. ✅ Strukturtest verifiziert.
 2. ✅ `inn_stem` + Scope-Abgleich (561 Kandidaten); Review-Fälle = 10 Antisense-Produkte.
-3. Import-Flow `IHDoKwgYA2PpDhoj`: Credentials anhängen → Batch-Test (limit 10) → Vollabzug (limit 1000) → `needs_review`-Queue abarbeiten (SmPC).
+3. ✅ Import-Flow `IHDoKwgYA2PpDhoj` batch-getestet (10 Produkte → 170 Packungen, 0 Fehler). Vollabzug: Flow wiederholt starten, bis `Summary.candidates == 0`; danach `needs_review`-Queue (SmPC) abarbeiten.
 4. Liste der EU-MA-Produkte an Sascha → ABDA-Rücklauf (PZN, AEK) → Load nach `presentation_market_code`.
 5. openFDA-Abgleich → `presentation_equivalence`.
 6. Aliquot-Vorschläge berechnen → manuelle Bestätigung.
