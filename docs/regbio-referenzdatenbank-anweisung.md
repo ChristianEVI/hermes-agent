@@ -145,22 +145,39 @@ Aliquot-Vorschlagslogik (System schlägt vor, Mensch bestätigt):
 - Wähle das kleinste Kandidaten-Volumen mit `n = Gesamtvolumen / v ≤ 50`; sonst das kleinste mit `n ≤ 100`.
 - Bestehende `canonical.aliquot_product` / `aliquot_lot` bleiben das operative System; die Vorschlagsfelder hängen an der Präsentation.
 
-## 7. Erweiterungsplan `canonical` (Migrationen)
+## 7. Umgesetzt in `canonical` (Migrationen, 2026-09-22)
 
-| Objekt | Art | Zweck |
+| Objekt | Status | Zweck |
 |---|---|---|
-| `canonical.inn_stem` | neue Tabelle | WHO-Stammtabelle (§2) |
-| `canonical.molecule.core_scope_status`, `molecule_class_detail` | befüllen | Scope-Ergebnis |
-| `canonical.presentation_equivalence` | neue Tabelle | EU↔US-Match mit `match_status` (§5) |
-| `canonical.presentation` | 6 neue Spalten | Aliquot-Vorschlag/-Bestätigung (§6) |
-| `canonical.presentation_market_code` | Daten laden | PZN + AEK aus ABDA (§4) |
-| `canonical.presentation_package` | RLS aktivieren | einzige `canonical`-Tabelle ohne RLS |
+| `canonical.inn_stem` (28 Zeilen, RLS an) | ✅ angelegt + befüllt | WHO-Stammtabelle (§2); `effect` = include / review / exclude |
+| `canonical.inn_stem_hits(inn)`, `inn_scope_status(inn)` | ✅ | Wort-basierter Suffix/Präfix/Zweitwort-Abgleich |
+| `canonical.regulatory_molecule.scope_status / scope_class` | ✅ befüllt | 353 in_scope · 11 review · 1.367 out_of_scope |
+| `canonical.classify_molecule_scope()` | ✅ | setzt `molecule.core_scope_status` (193 in_scope, 2 review, 19 out) — manuelle Werte bleiben |
+| `canonical.stem_class_to_detail()` | ✅ | mappt Stamm-Klasse auf den CHECK-Katalog von `molecule_class_detail` |
+| `canonical.v_pms_import_candidates` + RPC `public.pms_import_candidates` | ✅ | **561 Kandidaten** (EU, Scope, nicht withdrawn, keine ATMP; 162 Biosimilars, 10 review = Antisense) |
+| `canonical.presentation_equivalence` (RLS an) | ✅ angelegt | EU↔US-Match-Status (§5) |
+| `canonical.presentation` +18 Spalten | ✅ | `units_per_pack`, `amount_per_unit_*`, `reconstituted_volume_per_unit_ml`, `pms_*`, `field_sources`, `needs_review`, `manual_locked`, 6 Aliquot-Spalten |
+| `canonical.propose_aliquots()` / `_fallback()` | ✅ | Regel n ≤ 50, sonst ≤ 100; 20–400 µl |
+| `public.canonical_upsert_pms_extract(run_id, payload)` | ✅ angelegt, Batch-Test ausstehend | Upsert Produkt/Präsentation/Market-Code, respektiert `manual_locked` |
+
+Offen (bewusst nicht angefasst): RLS auf `canonical.presentation_package`.
+
+## 7a. n8n-Flows
+
+| Flow | ID | Zweck |
+|---|---|---|
+| TEST — EMA PMS Public API Strukturtest | `aD0u5lDXIrN2mDMs` | verifizierte Extraktion (4 Produkte) + Suchschlüssel-Test |
+| **EMA PMS → canonical Import** | `IHDoKwgYA2PpDhoj` | Kandidaten (RPC) → Namenssuche → 6000…-Filter → `$everything` → Extraktion → `pms_stage` → Upsert; Batch über `Parameter`-Node (limit/offset) |
+
+Credentials (einmalig in der UI anhängen): „EMA PMS Public API (OAuth2)" an `PMS Suche Name` + `PMS $everything`; „Supabase account FDA EMA" an `Kandidaten`, `Stage RPC`, `Upsert canonical`.
+
+Suchschlüssel-Befund: Namenssuche findet alle 10 zuvor fehlenden Produkte (Contains-Suche, bis 44 Treffer); `RegulatedAuthorization?identifier=` ist in der Public API **nicht exponiert** (404). Definitiver Join = Verfahrensnummer `EMEA/H/C/…` (`regulatory_product.ema_nr` ↔ `RegulatedAuthorization.case.identifier`).
 
 ## 8. Umsetzungsreihenfolge
 
-1. n8n **„TEST — EMA PMS Public API Strukturtest"** (`aD0u5lDXIrN2mDMs`): OAuth2-Credential am HTTP-Node auswählen, ausführen → bestätigt Datenform.
-2. `inn_stem` anlegen, Scope-Abgleich über `canonical.molecule` laufen lassen, Review der `review`-Fälle.
-3. n8n-**Import-Flow PMS → `canonical`** (Produkt, Präsentation, MA-Nr., Stärke; Parser für `description`; SmPC-Fallback-Queue).
+1. ✅ Strukturtest verifiziert.
+2. ✅ `inn_stem` + Scope-Abgleich (561 Kandidaten); Review-Fälle = 10 Antisense-Produkte.
+3. Import-Flow `IHDoKwgYA2PpDhoj`: Credentials anhängen → Batch-Test (limit 10) → Vollabzug (limit 1000) → `needs_review`-Queue abarbeiten (SmPC).
 4. Liste der EU-MA-Produkte an Sascha → ABDA-Rücklauf (PZN, AEK) → Load nach `presentation_market_code`.
 5. openFDA-Abgleich → `presentation_equivalence`.
 6. Aliquot-Vorschläge berechnen → manuelle Bestätigung.
