@@ -55,11 +55,15 @@ Beide Spalten sind heute zu >90 % leer.
 ## 3. Schritt 2 — EU-APIs und -Präsentationen (EMA)
 
 ### 3.1 Quellen
-- **PMS Public API** (`https://api.pms.ema.europa.eu/public/v1/MedicinalProductDefinition/{id}/$everything`) —
-  **keine Credentials nötig**; im Juli-Pilot (`regbio.stg_pms_everything`, 990 Produkte) bereits erfolgreich genutzt.
+- **PMS API** (`https://api.pms.ema.europa.eu/public/v1/MedicinalProductDefinition/{id}/$everything`,
+  Suche: `…/MedicinalProductDefinition?name=…`) — verlangt ein **SPOR-Bearer-Token**
+  (OAuth2 Client-Credentials; ohne Token: HTTP 401 „APIM. Not authorized"). Ein passendes
+  OAuth2-Credential existiert bereits in n8n (genutzt im Pilot-Flow „AUDIT — EMA PMS
+  Präsentationen (Pilot)", Node „everything"; `regbio.stg_pms_everything`, 990 Produkte).
+  Rate-Limit beachten: Pilot lief mit 8 Requests / 1,3 s.
 - **EMA-Medicines-Liste** (bestehender Flow „EMA Drug List Biologics - Sync") — liefert Biosimilar-Flag und Zulassungsstatus.
 - **SmPC (PDF)** — Fallback für Unit-Anzahl und Rekonstitutionsvolumen.
-- SPOR-Zugänge: **SMS Industry API** (Substanz-Stammdaten) nutzbar; **UPD** ist Tierarzneimittel → irrelevant; PMS-Industry-Credentials nicht erforderlich; Historic Data Registration nicht nötig.
+- SPOR-Zugänge: **PMS-Token-Credential** (vorhanden, s. o.); **SMS Industry API** (Substanz-Stammdaten) nutzbar; **UPD** ist Tierarzneimittel → irrelevant; Historic Data Registration nicht nötig. Zugangsdaten nur als n8n-Credential, nie im Chat/Repo.
 
 ### 3.2 Was PMS strukturiert liefert (Pilot-Befund)
 | Feld | Status |
@@ -146,7 +150,7 @@ Aliquot-Vorschlagslogik (System schlägt vor, Mensch bestätigt):
 
 ## 8. Umsetzungsreihenfolge
 
-1. n8n **„TEST — EMA PMS Public API Strukturtest"** ausführen → bestätigt Datenform (angelegt).
+1. n8n **„TEST — EMA PMS Public API Strukturtest"** (`aD0u5lDXIrN2mDMs`): OAuth2-Credential am HTTP-Node auswählen, ausführen → bestätigt Datenform.
 2. `inn_stem` anlegen, Scope-Abgleich über `canonical.molecule` laufen lassen, Review der `review`-Fälle.
 3. n8n-**Import-Flow PMS → `canonical`** (Produkt, Präsentation, MA-Nr., Stärke; Parser für `description`; SmPC-Fallback-Queue).
 4. Liste der EU-MA-Produkte an Sascha → ABDA-Rücklauf (PZN, AEK) → Load nach `presentation_market_code`.
